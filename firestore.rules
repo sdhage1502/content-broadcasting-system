@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function userData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isTeacher() {
+      return isAuthenticated() && userData().role == 'teacher';
+    }
+
+    function isPrincipal() {
+      return isAuthenticated() && userData().role == 'principal';
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      // Any authenticated user can read user docs (needed for principal
+      // lookups and teacher-name resolution on the live page).
+      allow read: if isAuthenticated();
+
+      // Self-create: the doc id must match the caller's auth uid.
+      // This covers both self-signup AND principal-driven provisioning
+      // (the secondary Firebase app signs in as the new user before writing).
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+
+      // Self-update or principal update.
+      allow update: if isOwner(userId) || isPrincipal();
+    }
+
+    // Contents collection
+    match /contents/{contentId} {
+      // Public read access for approved content (for live broadcast)
+      allow read: if resource.data.status == 'approved';
+
+      // Allow read for authenticated users
+      allow read: if isAuthenticated();
+
+      // Teachers can create their own content
+      allow create: if isTeacher()
+        && request.resource.data.teacherId == userData().teacherId;
+
+      // Teachers can update their own pending content
+      allow update: if isTeacher()
+        && resource.data.teacherId == userData().teacherId
+        && resource.data.status == 'pending';
+
+      // Principals have full control
+      allow create, update, delete: if isPrincipal();
+    }
+  }
+}

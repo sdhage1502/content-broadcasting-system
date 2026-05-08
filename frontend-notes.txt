@@ -1,0 +1,229 @@
+Content Broadcasting System — Frontend Notes
+=============================================
+
+1. PROJECT STRUCTURE
+--------------------
+src/
+├── app/                         Next.js 16 App Router routes
+│   ├── login/page.tsx
+│   ├── signup/page.tsx          Self-service teacher/principal signup
+│   ├── teacher/{layout,dashboard,upload,my-content}/…
+│   ├── principal/{layout,dashboard,teachers,pending,all-content}/…
+│   ├── live/[teacherId]/page.tsx   Public realtime broadcast
+│   ├── api/upload/route.ts         Server route: signed Cloudinary upload
+│   ├── layout.tsx                  Root: Theme + Auth + Toaster
+│   ├── page.tsx                    Redirects to login or role home
+│   └── globals.css                 Tailwind v4 + design tokens
+├── components/
+│   ├── ui/                         shadcn-style Radix primitives
+│   ├── common/                     Navbar, Sidebar/MobileNav,
+│   │                               ProtectedRoute, ThemeProvider/Toggle,
+│   │                               StatusBadge, EmptyState, LoadingState
+│   ├── dashboard/StatsCard.tsx
+│   ├── content/                    ContentUploadForm, ContentTable,
+│   │                               ContentPreview, RejectionModal
+│   └── live/LiveContent.tsx
+├── services/                       Thin wrappers around Firebase SDK
+│   ├── auth.service.ts             Firebase Auth login/signup + Firestore
+│   │                               profile read; createTeacher uses a
+│   │                               secondary Firebase app
+│   ├── content.service.ts          Firestore CRUD + signed Cloudinary upload
+│   ├── approval.service.ts         Firestore approve / reject
+│   └── live.service.ts             onSnapshot realtime subscription
+├── hooks/
+│   ├── useAuth.ts                  Reads AuthContext
+│   └── useContent.ts               useContentList + useStats, auto-scoped
+│                                   to the current teacher when applicable
+├── context/AuthContext.tsx         user / login / signup / logout / loading
+├── lib/
+│   ├── firebase.ts                 Lazy-init primary app + Auth + Firestore.
+│   │                               Exposes createSecondaryAuth() for
+│   │                               principal-driven teacher provisioning.
+│   ├── cloudinary.ts               Server-side signing helper
+│   ├── constants.ts                Subjects, file rules, role-home routes
+│   ├── utils.ts                    cn, formatDateTime, getErrorMessage
+│   │                               (Firebase code → friendly message map)
+│   └── validators.ts               Zod schemas: login, signup, upload, reject
+└── types/index.ts                  User, Content, Stats, …
+
+firestore.rules                     Production-ready Firestore rules
+firestore.indexes.json              Composite indexes for content queries
+
+
+2. AUTHENTICATION FLOW
+----------------------
+- Backed by Firebase Authentication (email/password). No bcrypt,
+  no localStorage tokens.
+- Login → authService.login(email, password):
+    1. signInWithEmailAndPassword(auth(), email, password)
+    2. Read profile doc at users/{uid} → returns the public User shape.
+- Signup (self-service) → authService.signup({...}):
+    1. Pre-flight duplicate check on the email field.
+    2. createUserWithEmailAndPassword on the PRIMARY Firebase app.
+    3. setDoc(users/{uid}, { email, name, role, teacherId, createdAt }).
+- Principal-driven teacher provisioning → authService.createTeacher(...):
+    1. Pre-flight duplicate check.
+    2. createSecondaryAuth() spins up a NAMED secondary Firebase app
+       so createUserWithEmailAndPassword doesn't replace the principal's
+       session on the primary app.
+    3. setDoc(users/{uid}) is performed via the PRIMARY Firestore
+       connection — so request.auth on the rules side is the principal,
+       satisfying `allow create: if isPrincipal()`.
+    4. The secondary app is signed-out + deleted in a finally block.
+- AuthContext subscribes via onAuthStateChanged and reactively loads
+  the matching profile from Firestore. ProtectedRoute waits on this
+  before rendering or redirecting.
+
+
+3. ROLE-BASED ACCESS
+--------------------
+- ProtectedRoute (components/common/ProtectedRoute.tsx) wraps every
+  authenticated route:
+    • redirects to /login if no user,
+    • redirects to ROLE_HOME[user.role] if role mismatches,
+    • renders LoadingState while AuthContext hydrates.
+- Client-side scoping:
+    • Teachers only ever see their own content — useContentList
+      injects `teacherId: user.teacherId` automatically.
+    • Principals see all content unless they explicitly filter.
+- Server-side enforcement is in firestore.rules:
+    • Teachers can create their own content (teacherId match) and
+      update only their own pending docs.
+    • Principals have full update rights (so approve/reject works).
+    • Approved content is publicly readable for the live page.
+
+
+4. ERROR HANDLING & VALIDATION
+------------------------------
+- All forms use react-hook-form + Zod (login, signup, upload, reject).
+  Inline `<p class="text-destructive">` messages render the first
+  Zod issue per field.
+- The Teachers > Add Teacher dialog uses a small bespoke validator
+  (name length, email regex, password ≥ 6) so errors render inline
+  AND a toast surfaces server-side failures.
+- lib/utils.ts → getErrorMessage(e, fallback) maps common Firebase
+  codes to friendly strings:
+      auth/invalid-credential       → "Invalid email or password."
+      auth/email-already-in-use     → "An account with this email already exists."
+      auth/weak-password            → "Password is too weak — use at least 6 characters."
+      auth/too-many-requests        → "Too many attempts. Please wait a few minutes…"
+      auth/network-request-failed   → "Network error. Check your connection…"
+      permission-denied             → "You don't have permission to perform this action."
+      …
+  All async surfaces (login, signup, upload, approve, reject, create
+  teacher) funnel errors through this helper before toasting.
+
+
+5. FIRESTORE SCHEMA
+-------------------
+users/{uid}    (uid = Firebase Auth uid)
+  email:        string             // lowercased, unique
+  name:         string
+  role:         "teacher" | "principal"
+  teacherId?:   string | null      // present only for teachers
+  createdAt:    Timestamp
+
+contents/{autoId}
+  title, subject, description?:     strings
+  fileUrl:                          string       // Cloudinary URL
+  fileType:                         string       // MIME
+  filePublicId, fileVersion:        Cloudinary handle for CldImage
+  startTime, endTime:               Timestamp
+  rotationDuration:                 number (minutes)
+  status:                           "pending" | "approved" | "rejected"
+  rejectionReason?:                 string
+  teacherId, teacherName:           strings
+  createdAt, reviewedAt?:           Timestamp
+
+
+6. LIVE PAGE (REALTIME)
+-----------------------
+- liveService.subscribe(teacherId, cb, onError) attaches a Firestore
+  onSnapshot to `where teacherId==X AND status=="approved"`.
+- The current time window (startTime ≤ now ≤ endTime) is filtered
+  client-side after each snapshot — Firestore can't range-query two
+  fields at once.
+- Approvals/rejections propagate to the live screen in near-realtime
+  with no polling.
+- LiveContent rotates through items via a setTimeout keyed off each
+  item's rotationDuration.
+
+
+7. STATE MANAGEMENT
+-------------------
+- Auth: React Context, role-aware, hydrated by onAuthStateChanged.
+- Content data: useContentList + useStats hooks over the services
+  layer. Each returns { data, loading, error, refetch }.
+- Live data: single Firestore subscription inside LiveContent.
+- Form state: react-hook-form + Zod.
+- Theme: next-themes with a header ThemeToggle.
+
+
+8. INDEXES & SORTING
+--------------------
+content.service.ts intentionally omits server-side orderBy and sorts
+client-side, so principal/teacher list pages never hit the
+"requires an index" error during development. firestore.indexes.json
+ships the composite indexes you'd want if you ever flip back to
+server-side sort:
+
+    contents (teacherId asc, status asc, createdAt desc)
+    contents (teacherId asc, createdAt desc)
+    contents (status asc, createdAt desc)
+
+
+9. ASSUMPTIONS
+--------------
+- Firebase project has Firestore + Authentication (email/password) enabled.
+- File uploads ≤ 10 MB; allowed: JPG, PNG, GIF, WebP, PDF, DOCX.
+  Server-side validation re-checks these in /api/upload before signing.
+- Tailwind v4 tokens defined in globals.css via @theme inline.
+- Next.js 16 specifics:
+    • Dynamic route pages receive params as a Promise —
+      /live/[teacherId]/page.tsx awaits it.
+    • middleware.ts is intentionally not used; auth is gated
+      client-side via ProtectedRoute.
+
+
+10. HOW TO RUN
+--------------
+Prerequisites: Node 18.18+ (20+ recommended), a Firebase project
+(Firestore + Authentication), and a Cloudinary account.
+
+  npm install
+  cp .env.example .env.local       # fill with Firebase + Cloudinary keys
+  firebase deploy --only firestore:rules,firestore:indexes
+  npm run dev                       # http://localhost:3000
+
+Default credentials seeded for the demo:
+  Principal:  max@yc.com     / max123
+  Teacher:    teacher@yc.com / teacher123
+
+Quick walkthrough:
+1. Visit / → redirected to /login.
+2. Sign in as principal max@yc.com / max123, OR
+   teacher@yc.com / teacher123, OR /signup as a teacher.
+3. Principal > Teachers → Add Teacher (uses secondary Firebase app
+   so the principal stays signed in). View per-teacher content via
+   the "View content" button on each card.
+4. Teacher: Upload → drag-drop an image → submit. Status starts as
+   pending.
+5. Principal: Pending Approval → preview, approve, or reject (reason
+   ≥ 5 chars).
+6. Open /live/<teacherId> in another window to see approved + in-window
+   items rotate in realtime.
+
+
+11. BONUS FEATURES SHIPPED
+--------------------------
+- Realtime live page via Firestore onSnapshot (no polling).
+- Skeleton loaders, empty states, and toasts on every async surface.
+- Drag-and-drop file upload to Cloudinary with image preview and
+  signed server-side upload.
+- Dark mode with system default + header toggle.
+- Pagination + status tabs + search on content lists.
+- Role-aware ProtectedRoute.
+- Per-teacher content viewer dialog on the principal's Teachers page.
+- Friendly Firebase error code → message mapping for all toasts.
+- Secondary-Firebase-app pattern so principals can provision teachers
+  without losing their own session.
