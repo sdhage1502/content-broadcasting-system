@@ -8,6 +8,7 @@ export function ThemeToggle() {
   const { setTheme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- standard next-themes hydration-safe mount detection
   useEffect(() => { setMounted(true); }, []);
 
   if (!mounted) return <Button variant="ghost" size="icon" disabled><Sun className="h-4 w-4" /></Button>;

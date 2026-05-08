@@ -84,6 +84,7 @@ export default function TeachersPage() {
     }
   }, []);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- legitimate auto-fetch on mount
   useEffect(() => { loadTeachers(); }, [loadTeachers]);
 
   const handleCreate = async (e: React.FormEvent) => {

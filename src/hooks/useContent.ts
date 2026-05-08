@@ -8,11 +8,14 @@ import type { Stats } from "@/types";
 export function useContentList(params: ContentListParams) {
   const { user } = useAuth();
 
-  const teacherIdScope = params.teacherId ?? (user?.role === "teacher" ? user.teacherId : undefined);
-  const paramsKey = useMemo(
-    () => JSON.stringify({ ...params, teacherId: teacherIdScope }),
-    [params, teacherIdScope],
+  const scopedParams = useMemo<ContentListParams>(
+    () => ({
+      ...params,
+      teacherId: params.teacherId ?? (user?.role === "teacher" ? user.teacherId : undefined),
+    }),
+    [params, user?.role, user?.teacherId],
   );
+  const paramsKey = useMemo(() => JSON.stringify(scopedParams), [scopedParams]);
 
   const [data, setData] = useState<ContentListResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -22,16 +25,18 @@ export function useContentList(params: ContentListParams) {
     setLoading(true);
     setError(null);
     try {
-      const res = await contentService.list(JSON.parse(paramsKey) as ContentListParams);
+      const res = await contentService.list(scopedParams);
       setData(res);
     } catch (e) {
       setError(getErrorMessage(e, "Failed to load content"));
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key derived above
   }, [paramsKey]);
 
-  useEffect(() => { void fetchData(); }, [fetchData]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- legitimate auto-fetch on mount/key change
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   return { data, loading, error, refetch: fetchData };
 }
@@ -57,6 +62,7 @@ export function useStats() {
     }
   }, [teacherId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- legitimate auto-fetch on mount/teacherId change
   useEffect(() => { fetchData(); }, [fetchData]);
 
   return { data, loading, error, refetch: fetchData };
