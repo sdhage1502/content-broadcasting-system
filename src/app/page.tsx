@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, GraduationCap, MonitorPlay, ShieldCheck, Sparkles, UploadCloud } from "lucide-react";
+import { ArrowRight, BookOpen, GraduationCap, MonitorPlay, ShieldCheck, Sparkles, UploadCloud } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { useAuth } from "@/hooks/useAuth";
@@ -70,24 +70,26 @@ export default function HomePage() {
           </Button>
         </div>
 
-        {/* Demo credentials card */}
-        <div className="mx-auto mt-10 max-w-xl rounded-xl border bg-card/70 p-5 text-left text-sm shadow-sm backdrop-blur">
-          <div className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5" /> Demo credentials
+        {/* Credentials callout — kept off the page on purpose; live in the repo README */}
+        <a
+          href="https://github.com/sdhage1502/content-broadcasting-system#login-details"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group mx-auto mt-10 flex max-w-xl items-start gap-3 rounded-xl border bg-card/70 p-4 text-left text-sm shadow-sm backdrop-blur transition-colors hover:bg-card"
+        >
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+            <BookOpen className="h-4 w-4" />
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-lg border bg-background/60 p-3">
-              <div className="text-xs font-medium text-muted-foreground">Principal</div>
-              <div className="mt-1 font-mono text-[13px]">max@yc.com</div>
-              <div className="font-mono text-[13px] text-muted-foreground">max123</div>
-            </div>
-            <div className="rounded-lg border bg-background/60 p-3">
-              <div className="text-xs font-medium text-muted-foreground">Teacher</div>
-              <div className="mt-1 font-mono text-[13px]">teacher@yc.com</div>
-              <div className="font-mono text-[13px] text-muted-foreground">teacher123</div>
-            </div>
+          <div className="flex-1">
+            <div className="font-medium">Demo credentials are in the README</div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              For test login IDs and passwords, please visit the project README on GitHub.
+            </p>
+            <span className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-primary group-hover:underline">
+              github.com/sdhage1502/content-broadcasting-system <ArrowRight className="h-3 w-3" />
+            </span>
           </div>
-        </div>
+        </a>
       </section>
 
       {/* Feature grid */}
